@@ -6,7 +6,7 @@
 # Subsequent work items add `pulse-daemon`, `pulse-hook`, `pulse-source`.
 [workspace]
 resolver = "2"
-members = ["crates/pulse-core"]
+members = ["crates/pulse-core", "crates/pulse-daemon"]
 
 [workspace.package]
 edition = "2021"
