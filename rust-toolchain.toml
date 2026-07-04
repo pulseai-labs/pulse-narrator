@@ -1,0 +1,6 @@
+# Pins the Rust toolchain for the workspace per MASTER-SPEC §Phase 8.1
+# ("rustup + stable cargo"). Stable channel, no nightly features.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

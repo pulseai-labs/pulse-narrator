@@ -1,0 +1,33 @@
+# Workspace virtual manifest.
+#
+# This is the first code in the canonical repo (VS-1.1.1 / work-1.01). It
+# declares the Cargo workspace and the workspace-wide dependency versions.
+# Member crates land under `crates/`; this item adds `pulse-core` only.
+# Subsequent work items add `pulse-daemon`, `pulse-hook`, `pulse-source`.
+[workspace]
+resolver = "2"
+members = ["crates/pulse-core"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+publish = false
+
+# Pinned once at the workspace level and inherited via `dep.workspace = true`
+# so crate manifests never drift. Floors are major-version ranges (per the
+# Rust API guidelines / Cargo semver convention): cargo resolves the highest
+# compatible version at build time.
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt", "macros", "io-util", "sync"] }
+tokio-stream = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+bytes = "1"
+futures = "0.3"
+
+# pulse-* internal crates will reference each other via path + workspace = true
+# once they exist. For now pulse-core is the dependency root (no workspace-crate
+# deps).
