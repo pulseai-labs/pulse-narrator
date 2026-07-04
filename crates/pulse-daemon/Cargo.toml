@@ -1,0 +1,19 @@
+[package]
+name = "pulse-daemon"
+description = "PulseVoice resident daemon: Unix-socket listener, SessionManager, idempotent dedup"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pulse-core = { path = "../pulse-core" }
+tokio = { workspace = true, features = ["net", "io-util", "signal", "rt-multi-thread", "macros", "sync", "fs", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+bytes = { workspace = true }
+futures = { workspace = true }

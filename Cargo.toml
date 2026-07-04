@@ -2,10 +2,11 @@
 #
 # Declares the Cargo workspace and the workspace-wide dependency versions.
 # Member crates land under `crates/`; work-1.01 added `pulse-core`, work-1.02
-# adds `pulse-hook`. Subsequent work items add `pulse-daemon`, `pulse-source`.
+# adds `pulse-hook`, work-1.03 adds `pulse-daemon`. Subsequent work items add
+# `pulse-source`.
 [workspace]
 resolver = "2"
-members = ["crates/pulse-core", "crates/pulse-hook"]
+members = ["crates/pulse-core", "crates/pulse-hook", "crates/pulse-daemon"]
 
 [workspace.package]
 edition = "2021"
