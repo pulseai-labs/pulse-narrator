@@ -1,0 +1,34 @@
+[package]
+name = "pulse-hook"
+description = "PulseVoice ephemeral hook subprocess: parses Claude Code hook payload, delivers a framed WireEvent to the daemon socket, fails fast."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pulse-hook"
+path = "src/main.rs"
+
+[dependencies]
+pulse-core = { path = "../pulse-core" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+# clap is hook-specific (argv parsing). The daemon and source crates don't need
+# it, so it lives here rather than in [workspace.dependencies].
+clap = { version = "4", features = ["derive"] }
+# tracing-subscriber wires stderr logging in the binary only; the lib doesn't
+# need it. Hook-specific, lives here.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
+tempfile = "3"

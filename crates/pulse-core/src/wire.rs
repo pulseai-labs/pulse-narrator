@@ -101,9 +101,11 @@ impl WireEvent {
 }
 
 /// Discriminator for [`WireEvent`]. This is the source-neutral set of
-/// hook→daemon deliveries; VS-1.1.1 only emits `TurnComplete`. Additional
-/// kinds (e.g. an explicit `Attention` delivery, a `Ping` health-check) land
-/// with later slices — each addition bumps [`wire_version()`].
+/// hook→daemon deliveries. VS-1.1.1 emits `TurnComplete` (Stop hook),
+/// `AttentionHint` (Notification hook), and `HookDegraded` (degenerate
+/// payload / no stable identity fields). Additional kinds (e.g. a `Ping`
+/// health-check) land with later slices — each addition bumps
+/// [`wire_version()`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WireEventKind {
@@ -113,6 +115,32 @@ pub enum WireEventKind {
     TurnComplete {
         session_id: SessionId,
         turn_id: TurnId,
+    },
+
+    /// A Notification hook fired for `session_id` (e.g. permission prompt,
+    /// idle). The hook forwards the raw kind string only; the full
+    /// AttentionEvent classification (permission-gate vs waiting-on-user) is
+    /// VS-1.1.3's job. `event_id` is the idempotency key the daemon dedups on.
+    AttentionHint {
+        session_id: SessionId,
+        event_id: String,
+        /// Raw Claude Code hook kind string, forwarded verbatim.
+        raw_kind: String,
+        /// Optional transcript-path forwarded for the daemon's reader (1.04).
+        transcript_path: Option<String>,
+    },
+
+    /// The hook could not derive a stable `event_id` from the payload (no
+    /// `message_id`, no derivable `(session_id, hook_kind, content_hash,
+    /// size)` tuple). Rather than synthesizing a collision-prone key and
+    /// silently dropping a sibling event, the hook forwards the reason and
+    /// lets the daemon surface it via the loud `DEGRADED` channel (NFR-15).
+    HookDegraded {
+        /// Human-readable reason the hook could not produce a normal event.
+        reason: String,
+        /// Best-effort session id if one was salvageable, for daemon-side
+        /// correlation; `None` if even that was underviable.
+        session_id: Option<SessionId>,
     },
 }
 

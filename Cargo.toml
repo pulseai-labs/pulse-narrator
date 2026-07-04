@@ -1,12 +1,11 @@
 # Workspace virtual manifest.
 #
-# This is the first code in the canonical repo (VS-1.1.1 / work-1.01). It
-# declares the Cargo workspace and the workspace-wide dependency versions.
-# Member crates land under `crates/`; this item adds `pulse-core` only.
-# Subsequent work items add `pulse-daemon`, `pulse-hook`, `pulse-source`.
+# Declares the Cargo workspace and the workspace-wide dependency versions.
+# Member crates land under `crates/`; work-1.01 added `pulse-core`, work-1.02
+# adds `pulse-hook`. Subsequent work items add `pulse-daemon`, `pulse-source`.
 [workspace]
 resolver = "2"
-members = ["crates/pulse-core"]
+members = ["crates/pulse-core", "crates/pulse-hook"]
 
 [workspace.package]
 edition = "2021"
@@ -19,7 +18,7 @@ publish = false
 # Rust API guidelines / Cargo semver convention): cargo resolves the highest
 # compatible version at build time.
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt", "macros", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-util", "sync", "net", "time", "fs"] }
 tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,6 +26,8 @@ thiserror = "1"
 tracing = "0.1"
 bytes = "1"
 futures = "0.3"
+# `clap` is hook-specific (argv parsing); the daemon and source crates don't
+# need it. Declared per-crate in `crates/pulse-hook/Cargo.toml`, NOT here.
 
 # pulse-* internal crates will reference each other via path + workspace = true
 # once they exist. For now pulse-core is the dependency root (no workspace-crate
