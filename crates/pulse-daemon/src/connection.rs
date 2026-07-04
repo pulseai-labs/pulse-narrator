@@ -137,6 +137,40 @@ pub async fn handle_connection(
                 }
             }
         }
+        WireEventKind::AttentionHint {
+            session_id,
+            event_id,
+            raw_kind,
+            transcript_path,
+        } => {
+            // Notification hook receipt. The full AttentionEvent
+            // classification (permission-gate vs waiting-on-user) is
+            // VS-1.1.3's job; here we only log receipt + carry the
+            // forwarded transcript_path for 1.04's reader. No transcript
+            // read on attention hints (reads happen on TurnComplete).
+            tracing::info!(
+                session_id = %session_id,
+                event_id = %event_id,
+                raw_kind = %raw_kind,
+                transcript_path = ?transcript_path,
+                kind = "attention_hint",
+                "attention event received"
+            );
+        }
+        WireEventKind::HookDegraded { reason, session_id } => {
+            // Degenerate payload from the hook (no derivable event_id). The
+            // SessionManager::record path already wrote the DEGRADED marker
+            // and logged at warn!; here we only log receipt at info! for
+            // observability symmetry with the other arms. The marker write
+            // is the loud-never-silent surface (NFR-15); this log is
+            // secondary.
+            tracing::info!(
+                session_id = ?session_id,
+                reason = %reason,
+                kind = "hook_degraded",
+                "degraded hook event received (DEGRADED marker written in record path)"
+            );
+        }
     }
 
     Ok(())

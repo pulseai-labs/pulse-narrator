@@ -93,24 +93,75 @@ impl SessionManager {
     /// On [`DedupVerdict::Duplicate`]: leaves state unchanged and logs at
     /// `debug!`.
     pub fn record(&mut self, event: &WireEvent) -> DedupVerdict {
-        // Single-arm exhaustive match on `WireEventKind`. Forward-compatible:
+        // Exhaustive match on `WireEventKind`. Forward-compatible by design:
         // when a new variant lands in pulse-core, this becomes non-exhaustive
-        // and the compiler forces the daemon to handle it.
-        let (session_id, event_id, transcript_path) = match &event.kind {
+        // and the compiler forces the daemon to handle it (which is how the
+        // AttentionHint/HookDegraded arms were added when work-1.02 extended
+        // the contract).
+        match &event.kind {
             WireEventKind::TurnComplete {
                 session_id,
                 turn_id,
             } => {
                 // event_id derivation for v1: turn_id is the stable per-logical-
                 // turn identifier. transcript_path is not yet carried by the
-                // envelope (1.04 threads it through).
-                (
+                // TurnComplete envelope (1.04 threads it through).
+                self.record_dedup(session_id.clone(), turn_id.as_str().to_owned(), None)
+            }
+            WireEventKind::AttentionHint {
+                session_id,
+                event_id,
+                transcript_path,
+                ..
+            } => {
+                // Notification hook event. Dedup on event_id (same idempotency
+                // contract as TurnComplete — Claude Code retries Notifications
+                // too). Carry the forwarded transcript_path into SessionState
+                // so 1.04's reader can pick it up. raw_kind is informational
+                // only; full AttentionEvent classification (permission-gate vs
+                // waiting-on-user) is VS-1.1.3's job.
+                self.record_dedup(
                     session_id.clone(),
-                    turn_id.as_str().to_owned(),
-                    None::<String>,
+                    event_id.clone(),
+                    transcript_path.clone(),
                 )
             }
-        };
+            WireEventKind::HookDegraded { reason, session_id } => {
+                // Degenerate payload — the hook could not derive a stable
+                // event_id. There is no dedup key, so this never participates
+                // in idempotent dedup; it is always `New` (recorded) and the
+                // daemon must surface it LOUDLY via the DEGRADED marker
+                // (NFR-15 loud-never-silent; work-1.02's contract explicitly
+                // requires the daemon to surface HookDegraded, not silently
+                // drop). mark_degraded is best-effort: a marker-write failure
+                // must not propagate (the daemon stays alive — NFR-12); log at
+                // warn! either way.
+                if let Some(sid) = session_id {
+                    // Touch the session so the daemon tracks that this session
+                    // produced a degraded event (a degenerate payload may still
+                    // carry a salvageable session_id for correlation).
+                    let _state = self.sessions.entry(sid.clone()).or_default();
+                }
+                if let Err(e) = crate::degraded::mark_degraded(reason) {
+                    tracing::warn!(error = %e, reason = %reason, "failed to write DEGRADED marker for HookDegraded event");
+                } else {
+                    tracing::warn!(reason = %reason, "HookDegraded event received — DEGRADED marker written");
+                }
+                DedupVerdict::New
+            }
+        }
+    }
+
+    /// Common path for `TurnComplete` + `AttentionHint`: idempotent dedup on
+    /// `event_id`, per-session. Updates `last_event_id`, threads
+    /// `transcript_path` into `SessionState` when present, and bumps
+    /// `receipt_seq` on `New`.
+    fn record_dedup(
+        &mut self,
+        session_id: SessionId,
+        event_id: String,
+        transcript_path: Option<String>,
+    ) -> DedupVerdict {
         let state = self.sessions.entry(session_id).or_default();
         if state.last_event_id.as_deref() == Some(event_id.as_str()) {
             tracing::debug!(
