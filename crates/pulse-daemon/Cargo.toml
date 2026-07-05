@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 pulse-core = { path = "../pulse-core" }
+pulse-source = { path = "../pulse-source" }
 tokio = { workspace = true, features = ["net", "io-util", "signal", "rt-multi-thread", "macros", "sync", "fs", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

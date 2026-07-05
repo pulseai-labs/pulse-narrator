@@ -60,11 +60,14 @@ pub fn build_event(
             match hook_kind {
                 HookKind::Stop => {
                     // Stop → TurnComplete. TurnId reuses the derived event_id;
-                    // the daemon keys dedup on it.
+                    // the daemon keys dedup on it. 1.04 threads `transcript_path`
+                    // through the envelope so the daemon can hand it to the
+                    // reader without re-deriving it from the payload.
                     let turn_id = pulse_core::TurnId::new(event_id);
                     WireEvent::new(WireEventKind::TurnComplete {
                         session_id,
                         turn_id,
+                        transcript_path: normalized_path,
                     })
                 }
                 HookKind::Notification => WireEvent::new(WireEventKind::AttentionHint {

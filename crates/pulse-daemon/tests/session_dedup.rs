@@ -18,6 +18,7 @@ fn turn(session: &str, turn: &str) -> WireEvent {
     WireEvent::new(WireEventKind::TurnComplete {
         session_id: SessionId::new(session),
         turn_id: TurnId::new(turn),
+        transcript_path: None,
     })
 }
 

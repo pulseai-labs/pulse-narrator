@@ -55,6 +55,7 @@ async fn synthetic_peer_write_is_accepted_and_recorded_as_new() {
     let event = WireEvent::new(WireEventKind::TurnComplete {
         session_id: SessionId::new("session-7"),
         turn_id: TurnId::new("turn-42"),
+        transcript_path: None,
     });
 
     // Producer side: write one framed WireEvent (this is what 1.02's hook will
@@ -135,6 +136,7 @@ async fn duplicate_event_is_acknowledged_not_recorded_as_new() {
         let event = WireEvent::new(WireEventKind::TurnComplete {
             session_id: SessionId::new("s-dup"),
             turn_id: TurnId::new("t-dup"),
+            transcript_path: None,
         });
         let write_task = tokio::spawn(async move {
             write_frame(&mut client, &event).await.expect("write_frame");

@@ -95,6 +95,7 @@ impl WireEvent {
             kind: WireEventKind::TurnComplete {
                 session_id,
                 turn_id,
+                transcript_path: None,
             },
         }
     }
@@ -104,17 +105,31 @@ impl WireEvent {
 /// hook→daemon deliveries. VS-1.1.1 emits `TurnComplete` (Stop hook),
 /// `AttentionHint` (Notification hook), and `HookDegraded` (degenerate
 /// payload / no stable identity fields). Additional kinds (e.g. a `Ping`
-/// health-check) land with later slices — each addition bumps
-/// [`wire_version()`].
+/// health-check) land with later slices — each new top-level variant bumps
+/// [`wire_version()`]. Additive optional fields on an existing variant
+/// (e.g. `transcript_path` on `TurnComplete`, added in work-1.04) do NOT
+/// bump wire_version, because `#[serde(default)]` + `Option`-typing keep
+/// older envelopes deserializable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WireEventKind {
     /// A complete turn was observed for `session_id`; the daemon should
     /// dispatch narration. The `turn_id` correlates with the source stream's
-    /// `SourceEvent::TurnComplete`.
+    /// `SourceEvent::TurnComplete`. The optional `transcript_path` is forwarded
+    /// from the Claude Code hook payload so the daemon (work-1.04) can hand it
+    /// to the transcript reader without re-deriving it. Additive over the
+    /// original `TurnComplete { session_id, turn_id }` shape; `Option`-typed +
+    /// `#[serde(default)]` keeps older envelopes (no `transcript_path` field)
+    /// deserializable — wire_version is NOT bumped (the field is purely
+    /// additive, per the pre-flight Q7 resolution).
     TurnComplete {
         session_id: SessionId,
         turn_id: TurnId,
+        /// Optional transcript path the hook extracted from the payload. `None`
+        /// when the hook could not derive one; the daemon's reader will skip
+        /// the read in that case.
+        #[serde(default)]
+        transcript_path: Option<String>,
     },
 
     /// A Notification hook fired for `session_id` (e.g. permission prompt,
