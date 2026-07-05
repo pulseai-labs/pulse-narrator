@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PulseVoice daemon launchd user-agent plist TEMPLATE (VS-1.1.1, work-1.05).
+  scripts/install-agent.sh renders this to ~/Library/LaunchAgents/com.pulsevoice.daemon.plist,
+  substituting the tokens shown below. Do NOT install this file verbatim.
+  Full rationale for every key lives in docs/install-lifecycle.md and spec work-1.05 sec 3.
+  Token scheme (substituted by install-agent.sh):
+    PV_BINARY_PATH   daemon binary (default: repo/target/debug/pulse-daemon)
+    PV_SOCKET_PATH   daemon Unix socket
+    PV_LAUNCHD_LOG   launchd stdout+stderr capture log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pulsevoice.daemon</string>
+
+    <!-- User domain (per-user agent). NOT a system LaunchDaemon. -->
+    <key>LaunchAgent</key>
+    <true/>
+
+    <!-- Always-on: start at login. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Crash-restart ONLY. SuccessfulExit=false means: do NOT restart on a
+         clean exit 0 (the daemon's SIGTERM/SIGINT graceful-shutdown path).
+         A non-zero exit (crash/panic) restarts within ThrottleInterval. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Minimum seconds between crash restarts. Default. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- The daemon binary + its socket path. Tokens resolved by install-agent.sh. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>@@PV_BINARY_PATH@@</string>
+        <string>--socket-path</string>
+        <string>@@PV_SOCKET_PATH@@</string>
+    </array>
+
+    <!-- launchd-level stderr+stdout capture (pre-tracing crash log). -->
+    <key>StandardOutPath</key>
+    <string>@@PV_LAUNCHD_LOG@@</string>
+    <key>StandardErrorPath</key>
+    <string>@@PV_LAUNCHD_LOG@@</string>
+</dict>
+</plist>
