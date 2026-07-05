@@ -30,6 +30,7 @@ fn small_event() -> WireEvent {
     WireEvent::new(WireEventKind::TurnComplete {
         session_id: SessionId::new("s1"),
         turn_id: TurnId::new("t1"),
+        transcript_path: None,
     })
 }
 

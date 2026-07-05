@@ -1,23 +1,30 @@
 //! Per-connection handler: read one framed `WireEvent`, decode, forward to
-//! `SessionManager`, log receipt.
+//! `SessionManager`, log receipt, and on `TurnComplete` invoke the transcript
+//! reader.
 //!
 //! One frame per connection (hook subprocesses write one and exit — spec §3
 //! async boundary 1). On any error (short frame, schema mismatch, decode
 //! failure), the handler logs at `warn!` and returns `Err`; the caller drops
 //! the connection. The daemon stays alive (NFR-12 / NFR-15).
 //!
-//! **Reader invocation (1.04 stub):** on `WireEventKind::TurnComplete`, the
-//! handler invokes the transcript reader — for R2 this is
-//! [`read_turn_stub`], which returns the happy-path contract values so the
-//! `ProbeOutcome` / `ReadVerdict` match arms compile and are exercised. R3
-//! (work-1.04) replaces the stub with a real call into `pulse-source`'s
-//! reader; the match arms for `ProbeOutcome::Drift` and
-//! `ReadVerdict::Truncated` then wire `crate::degraded::mark_degraded`.
+//! **Reader invocation (work-1.04):** on `WireEventKind::TurnComplete`, the
+//! handler invokes `pulse_source::read_complete(transcript_path,
+//! last_read_offset)` against the path the hook forwarded + the per-session
+//! `last_read_offset` from `SessionState`. The match arms wire
+//! `crate::degraded::mark_degraded` at:
+//!
+//! - `ReadVerdict::Truncated` — the read-safety layer's truncation signal.
+//! - `ProbeOutcome::Drift { detail }` — the schema-presence probe's drift
+//!   signal.
+//!
+//! Both write the loud-now `DEGRADED` marker so the silent-degradation
+//! hazards surface through one channel (NFR-15: loud, never silent).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pulse_core::source::{ProbeOutcome, ReadVerdict, TurnRead};
+use pulse_core::source::{ProbeOutcome, ReadVerdict};
 use pulse_core::wire::{read_frame, WireEventKind};
 use pulse_core::wire_version;
 use tokio::net::UnixStream;
@@ -88,51 +95,65 @@ pub async fn handle_connection(
         WireEventKind::TurnComplete {
             session_id,
             turn_id,
+            transcript_path,
         } => {
             tracing::info!(
                 session_id = %session_id,
                 turn_id = %turn_id,
+                transcript_path = ?transcript_path,
                 kind = "turn_complete",
                 "event received"
             );
-            // TODO(1.04): replace read_turn_stub with the real transcript
-            // reader from pulse-source. The reader probes against
-            // SessionState::last_read_offset and returns (ProbeOutcome,
-            // Option<TurnRead>). The match arms below are wired for R3; the
-            // reader call is a stub until pulse-source (work-1.04) lands.
-            let (probe, turn_read) = read_turn_stub();
-            match probe {
-                ProbeOutcome::Ok => {
-                    if let Some(read) = turn_read {
-                        // TODO(1.04): store read.read_offset in
-                        // SessionState::last_read_offset so the next probe
-                        // resumes correctly.
-                        match read.verdict {
-                            ReadVerdict::Settled | ReadVerdict::SettledAtBound => {
-                                tracing::debug!(
-                                    session_id = %session_id,
-                                    offset = read.read_offset,
-                                    "turn read settled"
-                                );
+            // Invoke the transcript reader (work-1.04). The path comes from
+            // the hook-forwarded envelope; the per-session last_read_offset
+            // comes from SessionState (held under the same lock as record()).
+            let last_read_offset = {
+                let guard = sessions.lock().await;
+                guard.get(session_id).and_then(|s| s.last_read_offset)
+            };
+            match transcript_path {
+                Some(path_str) if !path_str.is_empty() => {
+                    let path = PathBuf::from(path_str);
+                    match pulse_source::read_complete(&path, last_read_offset).await {
+                        Ok((probe, read)) => {
+                            // Store the reader's advanced offset back into
+                            // SessionState so the next probe resumes correctly.
+                            {
+                                let mut guard = sessions.lock().await;
+                                if let Some(state) = guard.get_mut(session_id) {
+                                    state.last_read_offset = Some(read.read_offset);
+                                }
                             }
-                            ReadVerdict::Truncated => {
-                                // TODO(1.04): crate::degraded::mark_degraded("truncated")
-                                // R3 wires mark_degraded() into this arm.
+                            handle_read_outcome(session_id, probe, read).await;
+                        }
+                        Err(e) => {
+                            // NFR-7: a read failure (missing file, permission
+                            // denied) degrades this turn via the same channel
+                            // — write the DEGRADED marker so the silent-failure
+                            // surface stays loud.
+                            tracing::warn!(
+                                session_id = %session_id,
+                                transcript_path = %path.display(),
+                                error = %e,
+                                "transcript read failed; writing DEGRADED marker"
+                            );
+                            if let Err(marker_err) =
+                                crate::degraded::mark_degraded(&format!("read failed: {e}"))
+                            {
                                 tracing::warn!(
-                                    session_id = %session_id,
-                                    "turn read truncated; degraded-marker write deferred to 1.04"
+                                    error = %marker_err,
+                                    "failed to write DEGRADED marker for read error"
                                 );
                             }
                         }
                     }
                 }
-                ProbeOutcome::Drift { detail } => {
-                    // TODO(1.04): crate::degraded::mark_degraded(&detail)
-                    // R3 wires mark_degraded() into this arm.
-                    tracing::warn!(
+                _ => {
+                    // No transcript_path on the envelope (the hook could not
+                    // derive one). Skip the read; nothing to narrate.
+                    tracing::debug!(
                         session_id = %session_id,
-                        detail = %detail,
-                        "transcript drift; degraded-marker write deferred to 1.04"
+                        "turn_complete with no transcript_path; skipping read"
                     );
                 }
             }
@@ -146,8 +167,9 @@ pub async fn handle_connection(
             // Notification hook receipt. The full AttentionEvent
             // classification (permission-gate vs waiting-on-user) is
             // VS-1.1.3's job; here we only log receipt + carry the
-            // forwarded transcript_path for 1.04's reader. No transcript
-            // read on attention hints (reads happen on TurnComplete).
+            // forwarded transcript_path for the reader's awareness. No
+            // transcript read on attention hints (reads happen on
+            // TurnComplete).
             tracing::info!(
                 session_id = %session_id,
                 event_id = %event_id,
@@ -176,23 +198,59 @@ pub async fn handle_connection(
     Ok(())
 }
 
-/// Stub transcript-reader invocation.
-///
-/// Returns the happy-path contract values so the daemon's
-/// `ProbeOutcome` / `ReadVerdict` match arms compile and are exercised against
-/// the real pulse-core types without depending on `pulse-source` (which is
-/// work-1.04, round 3). R3 replaces this with a real call.
-///
-/// The contract: `ProbeOutcome` probes the freshly-observed write against the
-/// session's `last_read_offset`; on `Ok`, the `TurnRead` carries the content
-/// digest, settlement verdict, and the byte offset the reader advanced to.
-fn read_turn_stub() -> (ProbeOutcome, Option<TurnRead>) {
-    (
-        ProbeOutcome::Ok,
-        Some(TurnRead {
-            digest: pulse_core::TurnDigest::new("stub"),
-            verdict: ReadVerdict::Settled,
-            read_offset: 0,
-        }),
-    )
+/// Apply the read-safety + probe verdicts: log + write the DEGRADED marker at
+/// the two `mark_degraded` call sites (Truncated, Drift). Both surface
+/// through one channel so the silent-degradation hazards are visible
+/// uniformly (NFR-15).
+async fn handle_read_outcome(
+    session_id: &pulse_core::SessionId,
+    probe: ProbeOutcome,
+    read: pulse_core::source::TurnRead,
+) {
+    match probe {
+        ProbeOutcome::Ok => match read.verdict {
+            ReadVerdict::Settled | ReadVerdict::SettledAtBound => {
+                tracing::debug!(
+                    session_id = %session_id,
+                    offset = read.read_offset,
+                    verdict = ?read.verdict,
+                    "turn read settled"
+                );
+            }
+            ReadVerdict::Truncated => {
+                // Read-safety hazard: the file's size regressed below
+                // last_read_offset (rotation/truncation). Write the DEGRADED
+                // marker so the operator sees this surface (NFR-15).
+                tracing::warn!(
+                    session_id = %session_id,
+                    offset = read.read_offset,
+                    "turn read truncated (size regression); writing DEGRADED marker"
+                );
+                if let Err(e) =
+                    crate::degraded::mark_degraded("truncated transcript (size regression)")
+                {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to write DEGRADED marker for Truncated verdict"
+                    );
+                }
+            }
+        },
+        ProbeOutcome::Drift { detail } => {
+            // Schema-presence probe hazard: the transcript's top-level shape
+            // does not match expectations. Write the DEGRADED marker with the
+            // source-neutral drift detail.
+            tracing::warn!(
+                session_id = %session_id,
+                detail = %detail,
+                "transcript drift; writing DEGRADED marker"
+            );
+            if let Err(e) = crate::degraded::mark_degraded(&detail) {
+                tracing::warn!(
+                    error = %e,
+                    "failed to write DEGRADED marker for Drift verdict"
+                );
+            }
+        }
+    }
 }

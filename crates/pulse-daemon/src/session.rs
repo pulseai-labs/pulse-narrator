@@ -85,6 +85,14 @@ impl SessionManager {
         self.sessions.get(session_id)
     }
 
+    /// Mutably borrow the state for a session, if tracked. Used by the
+    /// connection handler (work-1.04) to store the reader's advanced
+    /// `read_offset` into `SessionState::last_read_offset` so the next probe
+    /// resumes correctly.
+    pub fn get_mut(&mut self, session_id: &SessionId) -> Option<&mut SessionState> {
+        self.sessions.get_mut(session_id)
+    }
+
     /// Record an incoming [`WireEvent`] against its session and return the
     /// dedup verdict.
     ///
@@ -102,11 +110,17 @@ impl SessionManager {
             WireEventKind::TurnComplete {
                 session_id,
                 turn_id,
+                transcript_path,
             } => {
                 // event_id derivation for v1: turn_id is the stable per-logical-
-                // turn identifier. transcript_path is not yet carried by the
-                // TurnComplete envelope (1.04 threads it through).
-                self.record_dedup(session_id.clone(), turn_id.as_str().to_owned(), None)
+                // turn identifier. 1.04 threads the hook-forwarded
+                // transcript_path into SessionState so the reader can pick it
+                // up.
+                self.record_dedup(
+                    session_id.clone(),
+                    turn_id.as_str().to_owned(),
+                    transcript_path.clone(),
+                )
             }
             WireEventKind::AttentionHint {
                 session_id,
@@ -191,6 +205,7 @@ mod tests {
         WireEvent::new(WireEventKind::TurnComplete {
             session_id: SessionId::new(session),
             turn_id: TurnId::new(turn),
+            transcript_path: None,
         })
     }
 

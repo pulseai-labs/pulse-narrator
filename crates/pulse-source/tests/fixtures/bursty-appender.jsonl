@@ -1,0 +1,6 @@
+{"type":"user","message":{"role":"user","content":"fix the bug"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"looking"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"plan: 1) read 2) edit"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"editing now"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file":"a.rs"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
